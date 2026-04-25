@@ -1,8 +1,6 @@
-module github.com/zahlmann/openai-go-test
+module github.com/zahlmann/nanoagent
 
 go 1.25.0
-
-require github.com/openai/openai-go/v3 v3.32.0
 
 require (
 	github.com/tidwall/gjson v1.18.0 // indirect
