@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 )
 
 const endpoint string = "https://api.openai.com/v1/chat/completions"
@@ -14,8 +15,10 @@ const endpoint string = "https://api.openai.com/v1/chat/completions"
 var oaiKey = os.Getenv("OPENAI_API_KEY")
 
 type message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    *string    `json:"content,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"`
+	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
 }
 
 type functionParameters struct {
@@ -46,8 +49,12 @@ type functionCall struct {
 	Arguments string `json:"arguments"`
 }
 
+type modelFunctionArgs struct {
+	Args []string `json:"args"`
+}
+
 type toolCall struct {
-	Id       string       `json:"id"`
+	ID       string       `json:"id"`
 	Type     string       `json:"type"`
 	Function functionCall `json:"function"`
 }
@@ -56,26 +63,41 @@ type chatResponse struct {
 	ID      string `json:"id"`
 	Model   string `json:"model"`
 	Choices []struct {
-		Message struct {
-			Role      string     `json:"role"`
-			Content   string     `json:"content"`
-			ToolCalls []toolCall `json:"tool_calls"`
-		} `json:"message"`
-		FinishReason string `json:"finish_reason"`
+		Message      message `json:"message"`
+		FinishReason string  `json:"finish_reason"`
 	} `json:"choices"`
 }
 
 func main() {
-	input := apiInput{
+	apiInputPtr := constructApiInput("You are a helpful assistant.")
+	prompt := "Tell me what files are in this dir and parent dir."
+	addUserMessage(apiInputPtr, prompt)
+	outMessage, finishReason, err := modelCall(apiInputPtr)
+	if err != nil {
+		log.Fatalf("failure: %v", err)
+	}
+	fmt.Printf("model response: %+v\n", outMessage)
+	fmt.Printf("finish reason: %v\n", finishReason)
+	for finishReason != "stop" {
+		addAssistantMessage(apiInputPtr, outMessage)
+		toolMessages := executeBash(outMessage.ToolCalls)
+		addToolResults(apiInputPtr, toolMessages)
+		outMessage, finishReason, err = modelCall(apiInputPtr)
+		if err != nil {
+			log.Fatalf("failure: %v", err)
+		}
+		fmt.Printf("model response:\n%+v\n", *outMessage.Content)
+		fmt.Printf("finish reason: %v\n", finishReason)
+	}
+}
+
+func constructApiInput(developerMessage string) *apiInput {
+	return &apiInput{
 		Model: "gpt-5.4",
 		Messages: []message{
 			{
 				Role:    "developer",
-				Content: "You are a helpful assistant.",
-			},
-			{
-				Role:    "user",
-				Content: "List the files in this directory and the parent directory.",
+				Content: &developerMessage,
 			},
 		},
 		Tools: []tool{
@@ -101,25 +123,59 @@ func main() {
 			},
 		},
 	}
+}
+
+func addUserMessage(apiInput *apiInput, userMessage string) {
+	apiInput.Messages = append(
+		apiInput.Messages,
+		message{
+			Role:    "user",
+			Content: &userMessage,
+		},
+	)
+}
+
+func addAssistantMessage(apiInput *apiInput, assistantMessage message) {
+	apiInput.Messages = append(apiInput.Messages, assistantMessage)
+}
+
+func addToolResults(apiInput *apiInput, toolMessages []message) {
+	apiInput.Messages = append(apiInput.Messages, toolMessages...)
+}
+
+func executeBash(toolCalls []toolCall) []message {
+	var toolMessages []message
+	for _, call := range toolCalls {
+		var args modelFunctionArgs
+		json.Unmarshal([]byte(call.Function.Arguments), &args)
+		cmd, _ := exec.Command(string(args.Args[0]), args.Args[1:]...).CombinedOutput()
+		result := string(cmd)
+		toolMessages = append(
+			toolMessages,
+			message{
+				Role:       "tool",
+				ToolCallID: call.ID,
+				Content:    &result,
+			},
+		)
+	}
+	return toolMessages
+}
+
+func modelCall(apiInput *apiInput) (message, string, error) {
 	var inputBuf bytes.Buffer
-	err := json.NewEncoder(&inputBuf).Encode(input)
-	if err != nil {
-		log.Fatalf("encoding of api input failed: %v", err)
-	}
+	json.NewEncoder(&inputBuf).Encode(apiInput)
 	req, err := http.NewRequest("POST", endpoint, &inputBuf)
-	if err != nil {
-		log.Fatalf("creation of request to openai failed: %v", err)
-	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+oaiKey)
 
 	client := http.DefaultClient
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Fatalf("request to openai failed: %v", err)
+		return message{}, "", err
 	}
 	defer resp.Body.Close()
 	var out chatResponse
 	json.NewDecoder(resp.Body).Decode(&out)
-	fmt.Printf("model response: %v", out)
+	return out.Choices[0].Message, out.Choices[0].FinishReason, nil
 }
