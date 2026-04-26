@@ -69,15 +69,18 @@ type chatResponse struct {
 }
 
 func main() {
+	if len(os.Args) < 2 {
+		fmt.Println("usage: go run agent.go 'prompt'")
+		return
+	}
 	apiInputPtr := constructApiInput("You are a helpful assistant.")
-	prompt := "Tell me what files are in this dir and parent dir."
+	prompt := os.Args[1]
 	addUserMessage(apiInputPtr, prompt)
 	outMessage, finishReason, err := modelCall(apiInputPtr)
 	if err != nil {
 		log.Fatalf("failure: %v", err)
 	}
 	fmt.Printf("model response: %+v\n", outMessage)
-	fmt.Printf("finish reason: %v\n", finishReason)
 	for finishReason != "stop" {
 		addAssistantMessage(apiInputPtr, outMessage)
 		toolMessages := executeBash(outMessage.ToolCalls)
@@ -87,7 +90,6 @@ func main() {
 			log.Fatalf("failure: %v", err)
 		}
 		fmt.Printf("model response:\n%+v\n", *outMessage.Content)
-		fmt.Printf("finish reason: %v\n", finishReason)
 	}
 }
 
