@@ -55,7 +55,7 @@ type functionCall struct {
 }
 
 type modelFunctionArgs struct {
-	Args []string `json:"args"`
+	Command string `json:"command"`
 }
 
 type toolCall struct {
@@ -133,12 +133,9 @@ func constructApiInput(developerMessage string, model string) *apiInput {
 					Parameters: functionParameters{
 						Type: "object",
 						Properties: map[string]any{
-							"args": map[string]any{
-								"type": "array",
-								"items": map[string]any{
-									"type": "string",
-								},
-								"description": "Command and arguments to execute.",
+							"command": map[string]any{
+								"type":        "string",
+								"description": "Bash command to execute.",
 							},
 						},
 						Required: []string{"args"},
@@ -172,7 +169,7 @@ func executeBash(toolCalls []toolCall) []message {
 	for _, call := range toolCalls {
 		var args modelFunctionArgs
 		json.Unmarshal([]byte(call.Function.Arguments), &args)
-		cmd, _ := exec.Command(string(args.Args[0]), args.Args[1:]...).CombinedOutput()
+		cmd, _ := exec.Command("bash", "-lc", args.Command).CombinedOutput()
 		result := string(cmd)
 		toolMessages = append(
 			toolMessages,
