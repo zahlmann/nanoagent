@@ -102,7 +102,7 @@ func main() {
 		log.Fatalf("failure: %v", err)
 	}
 	fmt.Printf("model response: %+v\n", outMessage)
-	for finishReason != "stop" {
+	for finishReason == "tool_calls" {
 		addAssistantMessage(apiInputPtr, outMessage)
 		toolMessages := executeBash(outMessage.ToolCalls)
 		addToolResults(apiInputPtr, toolMessages)
