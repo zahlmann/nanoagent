@@ -138,7 +138,7 @@ func constructApiInput(developerMessage string, model string) *apiInput {
 								"description": "Bash command to execute.",
 							},
 						},
-						Required: []string{"args"},
+						Required: []string{"command"},
 					},
 				},
 			},
