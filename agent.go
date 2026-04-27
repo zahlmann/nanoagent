@@ -10,15 +10,20 @@ import (
 	"os/exec"
 )
 
-const endpoint string = "https://api.openai.com/v1/chat/completions"
+const oaiEndpoint string = "https://api.openai.com/v1/chat/completions"
+const dsEndpoint string = "https://api.deepseek.com/chat/completions"
+const oaiModel string = "gpt-5.5"
+const dsModel string = "deepseek-v4-pro"
 
 var oaiKey = os.Getenv("OPENAI_API_KEY")
+var dsKey = os.Getenv("DEEPSEEK_API_KEY")
 
 type message struct {
-	Role       string     `json:"role"`
-	Content    *string    `json:"content,omitempty"`
-	ToolCallID string     `json:"tool_call_id,omitempty"`
-	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
+	Role             string     `json:"role"`
+	Content          *string    `json:"content,omitempty"`
+	ToolCallID       string     `json:"tool_call_id,omitempty"`
+	ToolCalls        []toolCall `json:"tool_calls,omitempty"`
+	ReasoningContent *string    `json:"reasoning_content,omitempty"`
 }
 
 type functionParameters struct {
@@ -69,14 +74,30 @@ type chatResponse struct {
 }
 
 func main() {
-	if len(os.Args) < 2 {
-		fmt.Println("usage: go run agent.go 'prompt'")
+	if len(os.Args) < 3 {
+		fmt.Println("usage: go run agent.go [openai, deepseek] 'prompt'")
 		return
 	}
-	apiInputPtr := constructApiInput("You are a helpful assistant.")
-	prompt := os.Args[1]
+	var model string
+	var endpoint string
+	var apiKey string
+	switch providerArg := os.Args[1]; providerArg {
+	case "openai":
+		model = oaiModel
+		endpoint = oaiEndpoint
+		apiKey = oaiKey
+	case "deepseek":
+		model = dsModel
+		endpoint = dsEndpoint
+		apiKey = dsKey
+	default:
+		fmt.Println("usage: go run agent.go [openai, deepseek] 'prompt'")
+		return
+	}
+	apiInputPtr := constructApiInput("You are a helpful assistant.", model)
+	prompt := os.Args[2]
 	addUserMessage(apiInputPtr, prompt)
-	outMessage, finishReason, err := modelCall(apiInputPtr)
+	outMessage, finishReason, err := modelCall(apiInputPtr, endpoint, apiKey)
 	if err != nil {
 		log.Fatalf("failure: %v", err)
 	}
@@ -85,20 +106,21 @@ func main() {
 		addAssistantMessage(apiInputPtr, outMessage)
 		toolMessages := executeBash(outMessage.ToolCalls)
 		addToolResults(apiInputPtr, toolMessages)
-		outMessage, finishReason, err = modelCall(apiInputPtr)
+		outMessage, finishReason, err = modelCall(apiInputPtr, endpoint, apiKey)
 		if err != nil {
 			log.Fatalf("failure: %v", err)
 		}
-		fmt.Printf("model response:\n%+v\n", *outMessage.Content)
+		fmt.Printf("model response: %+v\n", outMessage)
 	}
+	fmt.Printf("final response:\n%+v\n", *outMessage.Content)
 }
 
-func constructApiInput(developerMessage string) *apiInput {
+func constructApiInput(developerMessage string, model string) *apiInput {
 	return &apiInput{
-		Model: "gpt-5.4",
+		Model: model,
 		Messages: []message{
 			{
-				Role:    "developer",
+				Role:    "system",
 				Content: &developerMessage,
 			},
 		},
@@ -164,12 +186,12 @@ func executeBash(toolCalls []toolCall) []message {
 	return toolMessages
 }
 
-func modelCall(apiInput *apiInput) (message, string, error) {
+func modelCall(apiInput *apiInput, endpoint string, apiKey string) (message, string, error) {
 	var inputBuf bytes.Buffer
 	json.NewEncoder(&inputBuf).Encode(apiInput)
 	req, err := http.NewRequest("POST", endpoint, &inputBuf)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+oaiKey)
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 
 	client := http.DefaultClient
 	resp, err := client.Do(req)
